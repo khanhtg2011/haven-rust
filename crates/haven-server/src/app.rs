@@ -4,9 +4,12 @@ use axum::{
 };
 use dashmap::DashMap;
 use haven_core::{db::DbPool, models::PublicConfig};
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::{ServeDir, ServeFile},
+};
 
 pub struct AppState {
     pub pool: DbPool,
@@ -14,6 +17,7 @@ pub struct AppState {
     pub public_config: Arc<RwLock<PublicConfig>>,
     pub voice_rooms: DashMap<String, HashSet<String>>,
     pub tx_broadcast: broadcast::Sender<String>,
+    pub public_dir: String,
 }
 
 pub fn create_router(state: Arc<AppState>) -> Router {
@@ -21,6 +25,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
+
+    let public_path = PathBuf::from(&state.public_dir);
+    let index_file = public_path.join("index.html");
+    let serve_dir = ServeDir::new(&public_path).not_found_service(ServeFile::new(&index_file));
 
     Router::new()
         // === System & Info Routes ===
@@ -63,6 +71,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // === WebSocket / Socket.IO ===
         .route("/socket.io/", get(crate::ws::handler::ws_upgrade_handler))
         .route("/ws", get(crate::ws::handler::ws_upgrade_handler))
+        // === Static Assets (UI & Client files) ===
+        .fallback_service(serve_dir)
         .layer(cors)
         .with_state(state)
 }

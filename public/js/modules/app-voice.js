@@ -1,0 +1,498 @@
+// Voice in the app: joining and leaving, mute and deafen, keeping the voice
+// buttons and status in step with the session, audio devices and the mic
+// level meter. The WebRTC side lives in voice.js.
+
+export default {
+
+// ── Voice ─────────────────────────────────────────────
+
+async _joinVoice() {
+  if (!this.currentChannel) return;
+  // Spam-click guard: while a join is already in-flight (waiting for mic
+  // permissions, ICE config fetch, getUserMedia), repeated clicks used to
+  // queue a fresh voice.join() per press. After a server restart, every
+  // buffered click then fired against the freshly-reconnected socket and
+  // produced a flood of "Joined voice chat" toasts plus duplicate
+  // voice-join / voice-leave server events. The flag is cleared in a
+  // finally block below regardless of outcome.
+  if (this._joiningVoice) return;
+  // Already in this channel's call: a second click that landed after the
+  // first join finished left and rejoined, opening the mic a second time.
+  if (this.voice?.inVoice && this.voice.currentChannel === this.currentChannel) return;
+  // If the socket is currently disconnected (e.g. user is mashing the
+  // button during a server restart) refuse to start. Emits would be
+  // buffered by socket.io and replayed N times on reconnect, producing
+  // the multi-toast / multi-join behaviour. The auto-rejoin code in the
+  // 'connect' handler will re-join voice automatically once we're back.
+  if (this.socket && this.socket.connected === false) {
+    this._showToast(t('voice.disconnected'), 'error');
+    return;
+  }
+  // Block voice join in text-only channels
+  const _jvChk = this.channels.find(c => c.code === this.currentChannel);
+  if (_jvChk && _jvChk.voice_enabled === 0) {
+    this._showToast(t('voice.disabled'), 'error');
+    return;
+  }
+  if (!this.user?.isAdmin && !this.user?.isGuest && !this._hasPerm('use_voice')) {
+    this._showToast(t('voice.no_permission'), 'error');
+    return;
+  }
+  if (this.user?.isGuest && this.serverSettings?.guests_allow_voice === 'false') {
+    this._showToast(t('voice.guests_no_voice'), 'error');
+    return;
+  }
+  this._joiningVoice = true;
+  // Visually disable the join buttons while the async pipeline runs so a
+  // human can't fire 15 of them. We restore disabled=false in finally.
+  const _joinBtns = [
+    document.getElementById('voice-join-btn'),
+    document.getElementById('voice-join-mobile')
+  ].filter(Boolean);
+  _joinBtns.forEach(b => { b.disabled = true; });
+  let success = false;
+  try {
+  // voice.join() auto-leaves old channel if connected
+  success = await this.voice.join(this.currentChannel);
+  if (success) {
+    const joinedCode = this.currentChannel;
+    const joinedUser = {
+      id: this.user.id,
+      username: this.user.displayName || this.user.username,
+      roleColor: this.user.roleColor || null,
+      isMuted: !!this.voice.isMuted,
+      isDeafened: !!this.voice.isDeafened
+    };
+
+    this._renderVoiceUsers([joinedUser], joinedCode);
+    this.voiceCounts[joinedCode] = Math.max(1, this.voiceCounts[joinedCode] || 0);
+    this.voiceChannelUsers[joinedCode] = [
+      joinedUser,
+      ...(this.voiceChannelUsers[joinedCode] || []).filter(u => u.id !== joinedUser.id)
+    ];
+    this._updateChannelVoiceIndicators();
+
+    this.notifications.playDirect('voice_join');
+    this._updateVoiceButtons(true);
+    this._syncMuteDeafenButtons();
+    this._updateVoiceStatus(true);
+    this._updateVoiceBar();
+    // Server's broadcastVoiceUsers (fired on our voice-join) prunes stale
+    // entries and emits both voice-users-update + voice-count-update, so
+    // the right panel and sidebar reconcile authoritatively a tick later.
+    // Don't emit get-voice-counts here; it can race the broadcast and
+    // re-seed the sidebar with stale counts on older builds.
+    this.socket.emit('request-voice-users', { code: joinedCode });
+    this._showToast(t('voice.joined'), 'success');
+  } else {
+    this._showToast(t('voice.mic_error'), 'error');
+  }
+  } finally {
+    this._joiningVoice = false;
+    // _updateVoiceButtons(true) already hides the join buttons after a
+    // successful join; restoring disabled=false here is for the failure
+    // path where the button stays visible.
+    _joinBtns.forEach(b => { b.disabled = false; });
+  }
+},
+
+_leaveVoice() {
+  // Capture the channel BEFORE voice.leave() nulls currentChannel so we
+  // can immediately clear the right voice panel and sidebar count for it.
+  // Don't wait for the server's voice-users-update broadcast. If we left
+  // the voice room before the broadcast fires, it may not reach us, and
+  // the panel would stay stuck showing us as a participant (#5347).
+  const leftCode = this.voice && this.voice.currentChannel;
+  this._cleanupFullscreenCallTiles?.();
+  this.voice.leave();
+  this._mutedByDeafen = false;
+  this.notifications.playDirect('voice_leave');
+  this._updateVoiceButtons(false);
+  this._updateVoiceStatus(false);
+  this._updateVoiceBar();
+  this._hideMusicPanel();
+  // Optimistic local clear, mirroring the optimistic seed done in _joinVoice.
+  if (leftCode) {
+    delete this.voiceCounts[leftCode];
+    delete this.voiceChannelUsers[leftCode];
+    // Clear the right VOICE panel whenever it was bound to the channel we
+    // just left, including the case where we're reading a different text
+    // channel (DM etc.) while the panel was still showing the VC roster.
+    if (this.currentChannel === leftCode || this._lastVoiceUsersChannel === leftCode) {
+      this._renderVoiceUsers([], leftCode);
+    }
+    this._updateChannelVoiceIndicators();
+  }
+  this._showToast(t('voice.left'), 'info');
+  // Close the soundboard panel/popup/modal, since sounds can't route to VC
+  // anymore, and the panel doubles as a 'you're in voice' affordance.
+  this._closeSoundboardForVoiceLeave?.();
+},
+
+_toggleMute() {
+  // While push to mute is held the mic stays muted; the toggle only changes
+  // what comes back on release (app-push-to-mute.js).
+  if (this._pushToMuteTakesToggle?.()) return;
+  const wasMuted = this.voice.isMuted;
+  if (wasMuted && this._mutedByDeafen) {
+    // Mute was auto-applied by deafen, so clear both together
+    if (this.voice.isMuted) this.voice.toggleMute();
+    if (this.voice.isDeafened) this.voice.toggleDeafen();
+    this._mutedByDeafen = false;
+    this.notifications.playDirect('mute_off');
+    if (this.voice.currentChannel) {
+      this.socket.emit('voice-mute-state', { code: this.voice.currentChannel, muted: false });
+      this.socket.emit('voice-deafen-state', { code: this.voice.currentChannel, deafened: false });
+    }
+  } else {
+    const muted = this.voice.toggleMute();
+    if (!muted) this._mutedByDeafen = false;
+    this.notifications.playDirect(muted ? 'mute_on' : 'mute_off');
+    if (this.voice.currentChannel) {
+      this.socket.emit('voice-mute-state', { code: this.voice.currentChannel, muted });
+    }
+  }
+  this._syncMuteDeafenButtons();
+  this._updateVoiceBar();
+},
+
+_toggleDeafen() {
+  const wasDeafened = this.voice.isDeafened;
+  if (wasDeafened) {
+    // Undeafening
+    this.voice.toggleDeafen();
+    if (this._mutedByDeafen) {
+      if (this.voice.isMuted) this.voice.toggleMute();
+      this._mutedByDeafen = false;
+      if (this.voice.currentChannel) {
+        this.socket.emit('voice-mute-state', { code: this.voice.currentChannel, muted: false });
+      }
+    }
+    this.notifications.playDirect('deafen_off');
+    if (this.voice.currentChannel) {
+      this.socket.emit('voice-deafen-state', { code: this.voice.currentChannel, deafened: false });
+    }
+  } else {
+    // Deafening
+    if (!this.voice.isMuted) {
+      this.voice.toggleMute();
+      this._mutedByDeafen = true;
+      if (this.voice.currentChannel) {
+        this.socket.emit('voice-mute-state', { code: this.voice.currentChannel, muted: true });
+      }
+    }
+    this.voice.toggleDeafen();
+    this.notifications.playDirect('deafen_on');
+    if (this.voice.currentChannel) {
+      this.socket.emit('voice-deafen-state', { code: this.voice.currentChannel, deafened: true });
+    }
+  }
+  this._syncMuteDeafenButtons();
+  this._updateVoiceBar();
+},
+
+// ── Voice UI reconciler ──────────────────────────────────
+//
+// The voice UI is written imperatively by _updateVoiceButtons/_updateVoiceStatus/
+// _updateVoiceBar from several unrelated call sites, and nothing ever recomputes
+// it. If it is torn down while the session is actually alive (which is what
+// produced "Haven shows Join Voice but I can still hear and talk to everyone"),
+// the only way back is for the user to click Join Voice, which is a needless
+// renegotiation of a session that never broke.
+//
+// Note that _updateVoiceButtons(false) also empties #screen-share-grid outright,
+// which is why the stream vanished with no entry in the hidden-streams bar: the
+// tiles were destroyed, not hidden. The audio elements live in #audio-container
+// and are untouched, which is exactly why the stream's sound kept playing.
+//
+// This runs on a timer and on focus/resize and repairs whichever side is stale.
+// IMPORTANT: this is UI-only. It must NEVER emit voice-rejoin / voice-leave.
+// A previous revision did, and on window maximize that tore down live peers
+// via voice-existing-users (no skipRenegotiate): the "instant disconnect
+// on first resize while streaming" bug.
+_reconcileVoiceUi() {
+  if (!this.voice) return;
+
+  // Fix the bookkeeping first if the media session says we're still in voice.
+  const repaired = this.voice.reassertSessionIfLive();
+
+  const peersLive = (this.voice.liveVoicePeerCount?.() || 0) > 0;
+  const micLive = !!(this.voice.localStream &&
+    this.voice.localStream.getTracks().some(t => t.readyState === 'live'));
+  const flagsInVoice = !!(this.voice.inVoice && this.voice.currentChannel);
+  // Media truth wins. Never paint "Join Voice" while peers/mic are live.
+  const sessionInVoice = flagsInVoice || peersLive || micLive;
+
+  const joinBtn = document.getElementById('voice-join-btn');
+  const joinVisible = !!joinBtn && joinBtn.style.display !== 'none';
+  // Hidden on purpose (welcome screen, voice off, no permission) is not a
+  // desync, so compare against what the channel allows (#5598).
+  const joinExpected = this._voiceJoinAvailable();
+  const bar = document.getElementById('voice-bar');
+  const barShowsVoice = !!bar && bar.style.display !== 'none' && bar.style.display !== '';
+
+  // Already consistent.
+  if (!repaired && sessionInVoice && !joinVisible && barShowsVoice) return;
+  if (!repaired && !sessionInVoice && joinVisible === joinExpected && !barShowsVoice) return;
+
+  // Only repair UPWARD when media is live. Never tear UI down on a flaky
+  // layout read during maximize; that wiped stream tiles.
+  if (!sessionInVoice) {
+    // Genuinely idle: leave UI alone unless it still shows connected chrome.
+    if (!barShowsVoice && joinVisible === joinExpected) return;
+    // Bar still says connected but media is dead: clear chrome.
+    if (barShowsVoice || joinVisible !== joinExpected) {
+      console.warn('[Voice] UI shows voice but media is dead, clearing chrome');
+      this._updateVoiceButtons(false);
+      this._updateVoiceStatus(false);
+      this._updateVoiceBar();
+    }
+    return;
+  }
+
+  console.warn('[Voice] UI/session desync: repairing UI upward', {
+    flagsInVoice, peersLive, micLive, joinVisible, barShowsVoice, repaired
+  });
+
+  this._updateVoiceButtons(true);
+  this._updateVoiceStatus(true);
+  this._updateVoiceBar();
+  this._syncMuteDeafenButtons();
+
+  // Restore stream tiles if a prior false-leave wiped them. No signalling.
+  try {
+    const restored = this.voice.reassertScreenStreams?.();
+    if (restored) console.warn('[Voice] Restored', restored, 'stream tile(s) after UI desync');
+  } catch (err) { console.warn('[Voice] reassertScreenStreams failed', err); }
+},
+
+_startVoiceUiReconciler() {
+  if (this._voiceUiReconcilerBound) return;
+  this._voiceUiReconcilerBound = true;
+  // Debounce resize heavily: maximize fires a burst of events. We only
+  // need to fix chrome after the layout settles, never mid-drag.
+  let resizeTimer = null;
+  const run = () => { try { this._reconcileVoiceUi(); } catch (e) { console.warn('[Voice] reconcile failed:', e); } };
+  const runDebounced = () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(run, 300);
+  };
+  window.addEventListener('focus', runDebounced);
+  window.addEventListener('resize', runDebounced);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) runDebounced(); });
+  this._voiceUiReconcilerTimer = setInterval(run, 5000);
+},
+
+/** Update all mute/deafen button instances (sidebar + header) to reflect current state */
+_syncMuteDeafenButtons() {
+  const isMuted = this.voice.isMuted;
+  const isDeafened = this.voice.isDeafened;
+  // Deafened means hearing nothing, the settings mic test included.
+  this._syncCallSettingsPlayback?.();
+  const ptmHeld = !!this._pushToMuteHeld?.();
+  ['voice-mute-btn', 'voice-mute-btn-header'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.textContent = '🎙️';
+    btn.title = ptmHeld ? t('voice.push_to_mute_held') : t(isMuted ? 'voice.unmute' : 'voice.mute');
+    btn.classList.toggle('muted', isMuted);
+    btn.classList.toggle('ptm-held', ptmHeld);
+  });
+  ['voice-deafen-btn', 'voice-deafen-btn-header'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.textContent = isDeafened ? '🔇' : '🔊';
+    btn.title = t(isDeafened ? 'voice.undeafen' : 'voice.deafen');
+    btn.classList.toggle('muted', isDeafened);
+  });
+  this._syncFullscreenCallControls?.();
+},
+
+// Whether "Join Voice" makes sense right now: a channel is open, voice is
+// on in it, and this user may use voice. The welcome screen, text-only
+// channels and people without the permission get no button (#5598).
+_voiceJoinAvailable() {
+  if (!this.currentChannel) return false;
+  const ch = this.channels && this.channels.find(c => c.code === this.currentChannel);
+  if (ch && ch.voice_enabled === 0) return false;
+  // Guests hold no roles, so voice for them is one server switch (#5687).
+  if (this.user?.isGuest) return this.serverSettings?.guests_allow_voice !== 'false';
+  return !!(this.user?.isAdmin || this._hasPerm('use_voice'));
+},
+
+// The stream, camera and Listen Together buttons follow the voice room you
+// are in: off where the room has them off, and back on in the next room that
+// allows them (D#66). Called on every join and when channel settings change.
+_applyVoiceRoomLimits() {
+  if (!this.voice?.inVoice) return;
+  const ch = this.channels?.find(c => c.code === this.voice.currentChannel);
+  const streamsOff = !!ch && ch.streams_enabled === 0;
+  const musicOff = !!ch && ch.music_enabled === 0;
+  const set = (id, off, offKey, onKey) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = off;
+    if (off) btn.title = t(offKey);
+    else if (!btn.classList.contains('sharing')) btn.title = t(onKey);
+  };
+  set('screen-share-btn', streamsOff, 'voice.streams_disabled', 'voice.screen_share');
+  set('voice-cam-btn', streamsOff, 'voice.streams_disabled', 'voice.panel.camera');
+  set('voice-listen-together-btn', musicOff, 'voice.music_disabled', 'voice.panel.listen_together');
+  this._syncFullscreenCallControls?.();
+},
+
+_updateVoiceButtons(inVoice) {
+  const showJoin = !inVoice && this._voiceJoinAvailable();
+  document.getElementById('voice-join-btn').style.display = showJoin ? 'inline-flex' : 'none';
+  // Show/hide the header voice-active indicator (not a button, just a label)
+  const indicator = document.getElementById('voice-active-indicator');
+  if (indicator) indicator.style.display = inVoice ? 'inline-flex' : 'none';
+
+  // Show/hide the sidebar voice controls panel (pinned at bottom)
+  const voicePanel = document.getElementById('voice-panel');
+  if (voicePanel) voicePanel.style.display = inVoice ? 'flex' : 'none';
+
+  const useSidebar = localStorage.getItem('haven_sidebar_voice_controls') === 'true';
+
+  // Show/hide mute/deafen header buttons (voice panel, default location)
+  const voiceHeaderMute = document.getElementById('voice-mute-btn-header');
+  if (voiceHeaderMute) voiceHeaderMute.style.display = (inVoice && !useSidebar) ? '' : 'none';
+  const voiceHeaderDeafen = document.getElementById('voice-deafen-btn-header');
+  if (voiceHeaderDeafen) voiceHeaderDeafen.style.display = (inVoice && !useSidebar) ? '' : 'none';
+
+  // Show/hide mute/deafen sidebar buttons (opt-in)
+  const sidebarMute = document.getElementById('voice-mute-btn');
+  if (sidebarMute) sidebarMute.style.display = (inVoice && useSidebar) ? '' : 'none';
+  const sidebarDeafen = document.getElementById('voice-deafen-btn');
+  if (sidebarDeafen) sidebarDeafen.style.display = (inVoice && useSidebar) ? '' : 'none';
+
+  // Mobile voice join in right sidebar
+  // NOTE: must use setProperty('display', ..., 'important') because the mobile CSS
+  // rule .mobile-voice-join { display: flex !important; } would otherwise win and
+  // keep the button visible while already in voice (#5387).
+  const mobileJoin = document.getElementById('voice-join-mobile');
+  if (mobileJoin) {
+    if (showJoin) mobileJoin.style.removeProperty('display');
+    else mobileJoin.style.setProperty('display', 'none', 'important');
+  }
+
+  if (inVoice) this._applyVoiceRoomLimits();
+
+  if (!inVoice) {
+    // Reset all mute/deafen buttons (sidebar + header)
+    ['voice-mute-btn', 'voice-mute-btn-header'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) { b.textContent = '🎙️'; b.title = t('voice.mute'); b.classList.remove('muted'); }
+    });
+    ['voice-deafen-btn', 'voice-deafen-btn-header'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) { b.textContent = '🔊'; b.title = t('voice.deafen'); b.classList.remove('muted'); }
+    });
+    document.getElementById('screen-share-btn').textContent = '🖥️';
+    document.getElementById('screen-share-btn').title = t('voice.screen_share');
+    document.getElementById('screen-share-btn').classList.remove('sharing');
+    document.getElementById('screen-share-btn').disabled = false;
+    document.getElementById('voice-cam-btn').textContent = '📷';
+    document.getElementById('voice-cam-btn').title = t('voice.panel.camera');
+    document.getElementById('voice-cam-btn').classList.remove('sharing');
+    document.getElementById('voice-cam-btn').disabled = false;
+    const _ltnBtn = document.getElementById('voice-listen-together-btn');
+    if (_ltnBtn) { _ltnBtn.disabled = false; _ltnBtn.title = t('voice.panel.listen_together'); }
+    // Hide voice settings sub-panel
+    const vsPanel = document.getElementById('voice-settings-panel');
+    if (vsPanel) vsPanel.style.display = 'none';
+    const vsBtn = document.getElementById('voice-settings-toggle');
+    if (vsBtn) vsBtn.classList.remove('active');
+
+    // Only destroy stream/webcam tiles when media is actually dead.
+    // A UI-only desync (maximize/resize flipping Join Voice on while
+    // WebRTC is still carrying the stream) used to wipe the grid here:
+    // audio kept playing with no tile and no way to restore without
+    // leave/rejoin. If peers or screen receivers are still live, leave
+    // the tiles alone; the reconciler will re-show the voice chrome.
+    const mediaStillLive = !!(this.voice && (
+      this.voice.inVoice ||
+      (this.voice.liveVoicePeerCount?.() || 0) > 0 ||
+      (this.voice.screenSharers && this.voice.screenSharers.size > 0) ||
+      (this.voice.localStream && this.voice.localStream.getTracks().some(t => t.readyState === 'live'))
+    ));
+    if (!mediaStillLive) {
+      this._cleanupFullscreenCallTiles?.();
+      const grid = document.getElementById('screen-share-grid');
+      if (grid) {
+        grid.querySelectorAll('video').forEach(v => { v.srcObject = null; });
+        grid.innerHTML = '';
+      }
+      const ssContainer = document.getElementById('screen-share-container');
+      if (ssContainer) ssContainer.style.display = 'none';
+      const wcGrid = document.getElementById('webcam-grid');
+      if (wcGrid) {
+        wcGrid.querySelectorAll('video').forEach(v => { v.srcObject = null; });
+        wcGrid.innerHTML = '';
+      }
+      const wcContainer = document.getElementById('webcam-container');
+      if (wcContainer) wcContainer.style.display = 'none';
+      this._screenShareMinimized = false;
+      this._removeScreenShareIndicator();
+      this._hideMusicPanel();
+    } else {
+      console.warn('[Voice] _updateVoiceButtons(false) skipped stream wipe (media still live)');
+    }
+  }
+  this._syncFullscreenCallControls?.();
+},
+
+_updateVoiceStatus(inVoice) {
+  const led = document.getElementById('status-voice-led');
+  const text = document.getElementById('status-voice-text');
+  if (!led || !text) return;
+  if (inVoice) {
+    this._setLed('status-voice-led', 'on');
+    text.textContent = t('voice.status_active');
+  } else {
+    this._setLed('status-voice-led', 'off');
+    text.textContent = t('voice.status_off');
+  }
+},
+
+_getVoiceChannelLabel() {
+  if (!this.voice || !this.voice.currentChannel) return '';
+  const ch = this.channels.find(c => c.code === this.voice.currentChannel);
+  if (!ch) return this.voice.currentChannel;
+  if (ch.is_dm && ch.dm_target) return `@ ${this._getNickname(ch.dm_target.id, ch.dm_target.username)}`;
+  return `# ${ch.name}`;
+},
+
+_updateVoiceBar() {
+  const bar = document.getElementById('voice-bar');
+  if (!bar) return;
+  if (this.voice && this.voice.inVoice && this.voice.currentChannel) {
+    const badges = [];
+    if (this._pushToMuteHeld?.()) badges.push(`<span class="voice-bar-badge voice-bar-badge-ptm">${t('voice.status_push_to_mute')}</span>`);
+    else if (this.voice.isMuted) badges.push(`<span class="voice-bar-badge">${t('voice.status_muted')}</span>`);
+    if (this.voice.isDeafened) badges.push(`<span class="voice-bar-badge">${t('voice.status_deafened')}</span>`);
+    const channelName = this._getVoiceChannelLabel();
+    bar.innerHTML = `
+      <div class="voice-bar-top">
+        <div class="voice-bar-status">
+          <span class="voice-bar-icon" aria-hidden="true">🔊</span>
+          <div class="voice-bar-status-copy">
+            <span class="voice-bar-status-text">${t('voice.bar_connected')}</span>
+            <span class="voice-bar-channel">${this._escapeHtml(channelName)}</span>
+          </div>
+        </div>
+        <div class="voice-bar-actions">
+          <button class="voice-bar-leave" id="voice-bar-leave-btn" title="${t('voice.disconnect')}">${t('voice.disconnect')}</button>
+          ${badges.length ? `<div class="voice-bar-badges">${badges.join('')}</div>` : ''}
+        </div>
+      </div>
+    `;
+    bar.style.display = 'flex';
+    document.getElementById('voice-bar-leave-btn').addEventListener('click', () => this._leaveVoice());
+  } else {
+    bar.innerHTML = '';
+    bar.style.display = 'none';
+  }
+},
+
+};

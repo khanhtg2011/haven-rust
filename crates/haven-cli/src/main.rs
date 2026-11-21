@@ -33,6 +33,8 @@ pub enum Commands {
         db: String,
         #[arg(long, default_value = "haven_default_secret_change_me_in_prod")]
         jwt_secret: String,
+        #[arg(long, default_value = "./public")]
+        public_dir: String,
     },
     /// Run the Haven Desktop client subsystems
     Desktop,
@@ -49,12 +51,19 @@ async fn main() -> anyhow::Result<()> {
             host,
             db,
             jwt_secret,
+            public_dir,
         } => {
             if let Some(parent) = std::path::Path::new(&db).parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
 
-            tracing::info!(host = %host, port = port, db = %db, "Initializing Haven SQLite database");
+            tracing::info!(
+                host = %host,
+                port = port,
+                db = %db,
+                public_dir = %public_dir,
+                "Initializing Haven SQLite database & static assets"
+            );
             let pool = create_pool(&db)?;
 
             let (tx_broadcast, _) = broadcast::channel(1024);
@@ -64,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
                 public_config: Arc::new(RwLock::new(PublicConfig::default())),
                 voice_rooms: DashMap::new(),
                 tx_broadcast,
+                public_dir,
             });
 
             let app = create_router(state);
