@@ -13,11 +13,8 @@ tower.workspace = true
 tower-http.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio-tungstenite.workspace = true
 futures-util.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 chrono.workspace = true
@@ -25,5 +22,6 @@ dashmap.workspace = true
 ahash.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 reqwest = { version = "0.12", features = ["json"] }
 tempfile = "3.17"

@@ -1,13 +1,8 @@
-use dashmap::DashMap;
 use haven_core::{
     db::{create_in_memory_pool, DbRepo},
-    models::{NewUser, PublicConfig, Webhook},
-    sanitizer::{blocked_word_in, parse_blocked_names, parse_slash},
+    models::NewUser,
+    sanitizer::{blocked_word_in, parse_slash},
 };
-use haven_server::app::{create_router, AppState};
-use serde_json::json;
-use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
 
 #[test]
 fn test_slash_parse_parity() {
