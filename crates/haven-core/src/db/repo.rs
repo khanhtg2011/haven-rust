@@ -29,7 +29,9 @@ impl DbRepo {
     pub fn get_user_by_id(conn: &Connection, id: i64) -> Result<Option<User>> {
         let mut stmt = conn.prepare(
             "SELECT id, username, display_name, password_hash, is_admin, is_guest,
-                    avatar, banner, bio, name_color, is_banned, created_at
+                    avatar, NULL AS banner, bio, NULL AS name_color,
+                    EXISTS(SELECT 1 FROM bans WHERE user_id = users.id) AS is_banned,
+                    created_at
              FROM users WHERE id = ?1",
         )?;
 
@@ -58,7 +60,9 @@ impl DbRepo {
     pub fn get_user_by_username(conn: &Connection, username: &str) -> Result<Option<User>> {
         let mut stmt = conn.prepare(
             "SELECT id, username, display_name, password_hash, is_admin, is_guest,
-                    avatar, banner, bio, name_color, is_banned, created_at
+                    avatar, NULL AS banner, bio, NULL AS name_color,
+                    EXISTS(SELECT 1 FROM bans WHERE user_id = users.id) AS is_banned,
+                    created_at
              FROM users WHERE username = ?1 COLLATE NOCASE",
         )?;
 
@@ -310,16 +314,27 @@ impl DbRepo {
         webhook: &Webhook,
     ) -> Result<Vec<VoiceChannelAccessible>> {
         let is_admin = if let Some(creator_id) = webhook.created_by {
-            let mut stmt = conn.prepare("SELECT is_admin, is_banned FROM users WHERE id = ?1")?;
-            let res = stmt.query_row(params![creator_id], |row| {
-                let admin: i32 = row.get(0)?;
-                let banned: i32 = row.get(1)?;
-                Ok((admin != 0, banned != 0))
-            })?;
-            if res.1 {
+            let is_banned: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM bans WHERE user_id = ?1)",
+                    params![creator_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+
+            if is_banned {
                 return Ok(Vec::new()); // Banned creator
             }
-            res.0
+
+            let admin: bool = conn
+                .query_row(
+                    "SELECT is_admin != 0 FROM users WHERE id = ?1",
+                    params![creator_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+
+            admin
         } else {
             false
         };
