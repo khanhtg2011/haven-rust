@@ -114,7 +114,8 @@ impl DbRepo {
     pub fn get_channel_by_id(conn: &Connection, id: i64) -> Result<Option<Channel>> {
         let mut stmt = conn.prepare(
             "SELECT id, code, name, topic, position, is_dm, is_temp_voice AS is_temp, voice_enabled,
-                    voice_user_limit, voice_bitrate, role_gate, channel_type, created_at
+                    voice_user_limit, voice_bitrate, role_gate, channel_type, parent_channel_id,
+                    COALESCE(is_private, 0) AS is_private, category, created_at
              FROM channels WHERE id = ?1",
         )?;
 
@@ -133,7 +134,10 @@ impl DbRepo {
                     voice_bitrate: row.get(9)?,
                     role_gate: row.get(10)?,
                     channel_type: row.get(11)?,
-                    created_at: row.get(12)?,
+                    parent_channel_id: row.get(12)?,
+                    is_private: row.get::<_, i32>(13)? != 0,
+                    category: row.get(14)?,
+                    created_at: row.get(15)?,
                 })
             })
             .optional()?;
@@ -144,7 +148,8 @@ impl DbRepo {
     pub fn get_channel_by_code(conn: &Connection, code: &str) -> Result<Option<Channel>> {
         let mut stmt = conn.prepare(
             "SELECT id, code, name, topic, position, is_dm, is_temp_voice AS is_temp, voice_enabled,
-                    voice_user_limit, voice_bitrate, role_gate, channel_type, created_at
+                    voice_user_limit, voice_bitrate, role_gate, channel_type, parent_channel_id,
+                    COALESCE(is_private, 0) AS is_private, category, created_at
              FROM channels WHERE code = ?1",
         )?;
 
@@ -163,7 +168,10 @@ impl DbRepo {
                     voice_bitrate: row.get(9)?,
                     role_gate: row.get(10)?,
                     channel_type: row.get(11)?,
-                    created_at: row.get(12)?,
+                    parent_channel_id: row.get(12)?,
+                    is_private: row.get::<_, i32>(13)? != 0,
+                    category: row.get(14)?,
+                    created_at: row.get(15)?,
                 })
             })
             .optional()?;
@@ -174,7 +182,8 @@ impl DbRepo {
     pub fn list_channels(conn: &Connection) -> Result<Vec<Channel>> {
         let mut stmt = conn.prepare(
             "SELECT id, code, name, topic, position, is_dm, is_temp_voice AS is_temp, voice_enabled,
-                    voice_user_limit, voice_bitrate, role_gate, channel_type, created_at
+                    voice_user_limit, voice_bitrate, role_gate, channel_type, parent_channel_id,
+                    COALESCE(is_private, 0) AS is_private, category, created_at
              FROM channels WHERE is_dm = 0 ORDER BY position ASC, id ASC",
         )?;
 
@@ -192,7 +201,10 @@ impl DbRepo {
                 voice_bitrate: row.get(9)?,
                 role_gate: row.get(10)?,
                 channel_type: row.get(11)?,
-                created_at: row.get(12)?,
+                parent_channel_id: row.get(12)?,
+                is_private: row.get::<_, i32>(13)? != 0,
+                category: row.get(14)?,
+                created_at: row.get(15)?,
             })
         })?;
 

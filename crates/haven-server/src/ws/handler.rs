@@ -227,6 +227,87 @@ async fn handle_event(
             }
         }
 
+        "get-messages" => {
+            let channel_code = payload["code"]
+                .as_str()
+                .or_else(|| payload["channel_code"].as_str())
+                .unwrap_or("f5b41ec5");
+            if let Ok(conn) = state.pool.get() {
+                if let Ok(Some(ch)) = DbRepo::get_channel_by_code(&conn, channel_code) {
+                    if let Ok(messages) = DbRepo::list_messages(&conn, ch.id, 100) {
+                        let msgs_json: Vec<serde_json::Value> = messages
+                            .into_iter()
+                            .map(|m| {
+                                json!({
+                                    "id": m.id,
+                                    "channel_id": m.channel_id,
+                                    "user_id": m.user_id,
+                                    "username": m.username,
+                                    "real_username": m.username,
+                                    "content": m.content,
+                                    "reply_to": m.reply_to,
+                                    "replyContext": null,
+                                    "is_pinned": m.is_pinned,
+                                    "pinned": m.is_pinned,
+                                    "is_edited": m.is_edited,
+                                    "reactions": [],
+                                    "avatar": null,
+                                    "avatar_shape": "circle",
+                                    "created_at": m.created_at,
+                                    "updated_at": m.updated_at
+                                })
+                            })
+                            .collect();
+
+                        let history = json!({
+                            "channelCode": channel_code,
+                            "messages": msgs_json,
+                            "lastReadMessageId": 0,
+                            "pinnedCount": 0
+                        });
+                        let evt = encode_event("message-history", &history);
+                        let _ = tx_direct.send(evt).await;
+                    }
+                }
+            }
+        }
+
+        "join-channel" => {
+            let channel_code = payload["code"]
+                .as_str()
+                .or_else(|| payload["channel_code"].as_str())
+                .unwrap_or("general");
+            let _ = tx_direct.send(encode_event("channel-joined", &json!({ "code": channel_code }))).await;
+        }
+
+        "get-channel-members" => {
+            let channel_code = payload["code"]
+                .as_str()
+                .or_else(|| payload["channel_code"].as_str())
+                .unwrap_or("general");
+            let _ = tx_direct.send(encode_event("channel-members", &json!({
+                "channelCode": channel_code,
+                "members": []
+            }))).await;
+        }
+
+        "request-online-users" => {
+            let channel_code = payload["code"]
+                .as_str()
+                .or_else(|| payload["channel_code"].as_str())
+                .unwrap_or("general");
+            let _ = tx_direct.send(encode_event("online-users", &json!({
+                "channelCode": channel_code,
+                "users": [
+                    { "id": user_id.unwrap_or(1), "username": username, "status": "online" }
+                ]
+            }))).await;
+        }
+
+        "get-voice-counts" => {
+            let _ = tx_direct.send(encode_event("voice-counts", &json!({}))).await;
+        }
+
         "get-server-settings" => {
             let settings = json!({
                 "serverName": "Haven",

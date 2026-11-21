@@ -14,6 +14,9 @@ pub struct Channel {
     pub voice_bitrate: i64,
     pub role_gate: Option<String>,
     pub channel_type: Option<String>,
+    pub parent_channel_id: Option<i64>,
+    pub is_private: bool,
+    pub category: Option<String>,
     pub created_at: String,
 }
 
