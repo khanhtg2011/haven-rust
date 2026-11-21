@@ -109,7 +109,7 @@ impl DbRepo {
 
     pub fn get_channel_by_id(conn: &Connection, id: i64) -> Result<Option<Channel>> {
         let mut stmt = conn.prepare(
-            "SELECT id, code, name, topic, position, is_dm, is_temp, voice_enabled,
+            "SELECT id, code, name, topic, position, is_dm, is_temp_voice AS is_temp, voice_enabled,
                     voice_user_limit, voice_bitrate, role_gate, channel_type, created_at
              FROM channels WHERE id = ?1",
         )?;
@@ -139,7 +139,7 @@ impl DbRepo {
 
     pub fn get_channel_by_code(conn: &Connection, code: &str) -> Result<Option<Channel>> {
         let mut stmt = conn.prepare(
-            "SELECT id, code, name, topic, position, is_dm, is_temp, voice_enabled,
+            "SELECT id, code, name, topic, position, is_dm, is_temp_voice AS is_temp, voice_enabled,
                     voice_user_limit, voice_bitrate, role_gate, channel_type, created_at
              FROM channels WHERE code = ?1",
         )?;
@@ -169,7 +169,7 @@ impl DbRepo {
 
     pub fn list_channels(conn: &Connection) -> Result<Vec<Channel>> {
         let mut stmt = conn.prepare(
-            "SELECT id, code, name, topic, position, is_dm, is_temp, voice_enabled,
+            "SELECT id, code, name, topic, position, is_dm, is_temp_voice AS is_temp, voice_enabled,
                     voice_user_limit, voice_bitrate, role_gate, channel_type, created_at
              FROM channels WHERE is_dm = 0 ORDER BY position ASC, id ASC",
         )?;
@@ -204,20 +204,26 @@ impl DbRepo {
         conn: &Connection,
         channel_id: i64,
         user_id: i64,
-        username: &str,
+        _username: &str,
         content: &str,
         reply_to: Option<i64>,
     ) -> Result<Message> {
         conn.execute(
-            "INSERT INTO messages (channel_id, user_id, username, content, reply_to)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![channel_id, user_id, username, content, reply_to],
+            "INSERT INTO messages (channel_id, user_id, content, reply_to)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![channel_id, user_id, content, reply_to],
         )?;
 
         let id = conn.last_insert_rowid();
         let mut stmt = conn.prepare(
-            "SELECT id, channel_id, user_id, username, content, reply_to, is_pinned, is_edited, created_at, updated_at
-             FROM messages WHERE id = ?1",
+            "SELECT m.id, m.channel_id, m.user_id,
+                    COALESCE(m.webhook_username, u.username, 'Unknown') AS username,
+                    m.content, m.reply_to, 0 AS is_pinned,
+                    (m.edited_at IS NOT NULL) AS is_edited,
+                    m.created_at, COALESCE(m.edited_at, m.created_at) AS updated_at
+             FROM messages m
+             LEFT JOIN users u ON u.id = m.user_id
+             WHERE m.id = ?1",
         )?;
 
         let msg = stmt.query_row(params![id], |row| {
@@ -240,8 +246,15 @@ impl DbRepo {
 
     pub fn list_messages(conn: &Connection, channel_id: i64, limit: i64) -> Result<Vec<Message>> {
         let mut stmt = conn.prepare(
-            "SELECT id, channel_id, user_id, username, content, reply_to, is_pinned, is_edited, created_at, updated_at
-             FROM messages WHERE channel_id = ?1 ORDER BY id DESC LIMIT ?2",
+            "SELECT m.id, m.channel_id, m.user_id,
+                    COALESCE(m.webhook_username, u.username, 'Unknown') AS username,
+                    m.content, m.reply_to, 0 AS is_pinned,
+                    (m.edited_at IS NOT NULL) AS is_edited,
+                    m.created_at, COALESCE(m.edited_at, m.created_at) AS updated_at
+             FROM messages m
+             LEFT JOIN users u ON u.id = m.user_id
+             WHERE m.channel_id = ?1
+             ORDER BY m.id DESC LIMIT ?2",
         )?;
 
         let rows = stmt.query_map(params![channel_id, limit], |row| {
