@@ -1,6 +1,6 @@
 use axum::{
-    extract::State,
-    response::Json,
+    extract::{Path, State},
+    response::{Json, Redirect},
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -72,4 +72,31 @@ pub async fn get_themes() -> Json<serde_json::Value> {
             "swatch": { "bg": "#0b0d12", "panel": "#161a22", "accent": "#00ff9d", "text": "#eef1f6" }
         }
     ]))
+}
+
+pub async fn get_health() -> Json<serde_json::Value> {
+    Json(json!({ "status": "ok" }))
+}
+
+pub async fn get_bot_commands() -> Json<serde_json::Value> {
+    Json(json!([]))
+}
+
+pub async fn get_registration_info() -> Json<serde_json::Value> {
+    Json(json!({
+        "requiresToken": false,
+        "invitesBypassToken": true,
+        "captchaEnabled": false,
+        "turnstileSiteKey": null
+    }))
+}
+
+pub async fn get_guest_info() -> Json<serde_json::Value> {
+    Json(json!({
+        "guestEnabled": false
+    }))
+}
+
+pub async fn invite_redirect(Path(vanity_code): Path<String>) -> Redirect {
+    Redirect::temporary(&format!("/app?invite={vanity_code}"))
 }

@@ -28,10 +28,23 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 
     let public_path = PathBuf::from(&state.public_dir);
     let index_file = public_path.join("index.html");
-    let serve_dir = ServeDir::new(&public_path).not_found_service(ServeFile::new(&index_file));
+    let app_file = public_path.join("app.html");
+    let socket_io_file = public_path.join("socket.io").join("socket.io.js");
+    let flappy_file = public_path.join("games").join("flappy.html");
+    let theme_preview_file = public_path.join("theme-preview.html");
+
+    let serve_dir = ServeDir::new(&public_path);
 
     Router::new()
+        // === Web UI Routes ===
+        .route_service("/", ServeFile::new(&index_file))
+        .route_service("/app", ServeFile::new(&app_file))
+        .route_service("/socket.io/socket.io.js", ServeFile::new(&socket_io_file))
+        .route_service("/games/flappy", ServeFile::new(&flappy_file))
+        .route_service("/theme-preview", ServeFile::new(&theme_preview_file))
+        .route("/invite/{vanityCode}", get(crate::routes::info::invite_redirect))
         // === System & Info Routes ===
+        .route("/api/health", get(crate::routes::info::get_health))
         .route("/api/version", get(crate::routes::info::get_version))
         .route(
             "/api/public-config",
@@ -43,6 +56,15 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/plugins", get(crate::routes::info::get_plugins))
         .route("/api/themes", get(crate::routes::info::get_themes))
+        .route("/api/bot-commands", get(crate::routes::info::get_bot_commands))
+        .route(
+            "/api/auth/registration-info",
+            get(crate::routes::info::get_registration_info),
+        )
+        .route(
+            "/api/auth/guest-info",
+            get(crate::routes::info::get_guest_info),
+        )
         // === Auth Routes ===
         .route("/api/auth/register", post(crate::routes::auth::register))
         .route("/api/auth/login", post(crate::routes::auth::login))
@@ -71,7 +93,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // === WebSocket / Socket.IO ===
         .route("/socket.io/", get(crate::ws::handler::ws_upgrade_handler))
         .route("/ws", get(crate::ws::handler::ws_upgrade_handler))
-        // === Static Assets (UI & Client files) ===
+        // === Static Assets (CSS, JS, Fonts, Emoji, Uploads...) ===
         .fallback_service(serve_dir)
         .layer(cors)
         .with_state(state)
