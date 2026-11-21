@@ -1,0 +1,30 @@
+[
+  {
+    "input": "b4d_w0rd",
+    "blocked_list": [
+      "badword"
+    ],
+    "is_blocked": true
+  },
+  {
+    "input": "B A D W O R D",
+    "blocked_list": [
+      "badword"
+    ],
+    "is_blocked": true
+  },
+  {
+    "input": "normal_user",
+    "blocked_list": [
+      "badword"
+    ],
+    "is_blocked": false
+  },
+  {
+    "input": "Admin",
+    "blocked_list": [
+      "admin"
+    ],
+    "is_blocked": true
+  }
+]

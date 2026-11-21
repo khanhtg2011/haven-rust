@@ -1,0 +1,20 @@
+{
+  "voice_join": {
+    "channel_code": "yapping",
+    "self_mute": false,
+    "self_deaf": false
+  },
+  "voice_offer": {
+    "target_user_id": 2,
+    "sdp": {
+      "type": "offer",
+      "sdp": "v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    }
+  },
+  "send_message": {
+    "channel_code": "general",
+    "content": "Hello Haven from Rust!",
+    "reply_to": null,
+    "attachments": []
+  }
+}

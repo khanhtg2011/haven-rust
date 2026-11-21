@@ -1,0 +1,34 @@
+[
+  {
+    "input": "/ban @user spamming",
+    "expected": {
+      "command": "ban",
+      "args": "@user spamming"
+    }
+  },
+  {
+    "input": "/mute @user 10m",
+    "expected": {
+      "command": "mute",
+      "args": "@user 10m"
+    }
+  },
+  {
+    "input": "/purge 25",
+    "expected": {
+      "command": "purge",
+      "args": "25"
+    }
+  },
+  {
+    "input": "Just a normal message /notacommand",
+    "expected": null
+  },
+  {
+    "input": "/help",
+    "expected": {
+      "command": "help",
+      "args": ""
+    }
+  }
+]

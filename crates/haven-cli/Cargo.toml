@@ -1,0 +1,22 @@
+[package]
+name = "haven-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "haven"
+path = "src/main.rs"
+
+[dependencies]
+haven-core = { path = "../haven-core" }
+haven-server = { path = "../haven-server" }
+haven-desktop = { path = "../haven-desktop" }
+tokio.workspace = true
+axum.workspace = true
+dashmap.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

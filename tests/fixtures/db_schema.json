@@ -1,0 +1,322 @@
+[
+  {
+    "name": "users",
+    "sql": "CREATE TABLE users (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      username TEXT UNIQUE NOT NULL COLLATE NOCASE,\n      password_hash TEXT NOT NULL,\n      is_admin INTEGER DEFAULT 0,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    , \"must_change_password\" INTEGER DEFAULT 0, \"temp_password_hash\" TEXT DEFAULT NULL, \"is_guest\" INTEGER DEFAULT 0, \"status\" TEXT DEFAULT 'online', \"status_text\" TEXT DEFAULT '', \"display_name\" TEXT DEFAULT NULL, \"display_name_locked\" INTEGER DEFAULT 0, \"avatar\" TEXT DEFAULT NULL, \"avatar_shape\" TEXT DEFAULT 'circle', \"animate_profile\" TEXT DEFAULT 'trigger', \"border\" TEXT DEFAULT NULL, \"border_transform\" TEXT DEFAULT NULL, \"bio\" TEXT DEFAULT '', \"birthday\" TEXT DEFAULT NULL, \"birthday_set_at\" TEXT DEFAULT NULL, \"birthday_hide_year\" INTEGER DEFAULT 1, \"birthday_hidden\" INTEGER DEFAULT 0, \"public_key\" TEXT DEFAULT NULL, \"signing_key\" TEXT DEFAULT NULL, \"signing_backup\" TEXT DEFAULT NULL, \"encrypted_private_key\" TEXT DEFAULT NULL, \"e2e_key_salt\" TEXT DEFAULT NULL, \"e2e_secret\" TEXT DEFAULT NULL, \"e2e_passphrase\" INTEGER DEFAULT 0, \"oidc_subject\" TEXT DEFAULT NULL, \"oidc_issuer\" TEXT DEFAULT NULL, \"password_version\" INTEGER DEFAULT 1, \"totp_secret\" TEXT DEFAULT NULL, \"totp_enabled\" INTEGER DEFAULT 0, \"encrypted_servers\" TEXT DEFAULT NULL, official_mode INTEGER NOT NULL DEFAULT 0)"
+  },
+  {
+    "name": "sqlite_sequence",
+    "sql": "CREATE TABLE sqlite_sequence(name,seq)"
+  },
+  {
+    "name": "channels",
+    "sql": "CREATE TABLE channels (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      name TEXT NOT NULL,\n      code TEXT UNIQUE NOT NULL,\n      created_by INTEGER REFERENCES users(id),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    , \"show_welcome\" INTEGER DEFAULT 0, \"topic\" TEXT DEFAULT '', \"is_dm\" INTEGER DEFAULT 0, code_visibility TEXT DEFAULT 'public', code_mode TEXT DEFAULT 'static', code_rotation_type TEXT DEFAULT 'time', code_rotation_interval INTEGER DEFAULT 60, code_rotation_counter INTEGER DEFAULT 0, code_last_rotated DATETIME DEFAULT NULL, \"default_role_id\" INTEGER DEFAULT NULL REFERENCES roles(id) ON DELETE SET NULL, \"parent_channel_id\" INTEGER DEFAULT NULL REFERENCES channels(id) ON DELETE SET NULL, \"position\" INTEGER DEFAULT 0, \"is_private\" INTEGER DEFAULT 0, \"expires_at\" DATETIME DEFAULT NULL, \"is_temp_voice\" INTEGER DEFAULT 0, streams_enabled INTEGER DEFAULT 1, music_enabled INTEGER DEFAULT 1, slow_mode_interval INTEGER DEFAULT 0, category TEXT DEFAULT NULL, sort_alphabetical INTEGER DEFAULT 0, cleanup_exempt INTEGER DEFAULT 0, channel_type TEXT DEFAULT 'standard', voice_user_limit INTEGER DEFAULT 0, media_enabled INTEGER DEFAULT 1, notification_type TEXT DEFAULT 'default', voice_enabled INTEGER DEFAULT 1, text_enabled INTEGER DEFAULT 1, soundboard_enabled INTEGER DEFAULT 1, reactions_enabled INTEGER DEFAULT 1, is_forum INTEGER DEFAULT 0, forum_tags TEXT DEFAULT NULL, is_nsfw INTEGER DEFAULT 0, auto_delete_mode TEXT DEFAULT 'delete', auto_delete_interval_hours INTEGER DEFAULT NULL, role_gate TEXT DEFAULT NULL, forum_layout TEXT DEFAULT NULL, \"key_epoch\" INTEGER DEFAULT 0, \"is_group\" INTEGER DEFAULT 0, \"is_self_dm\" INTEGER DEFAULT 0, \"forum_votes\" INTEGER DEFAULT 0, \"forum_blog\" INTEGER DEFAULT 0, \"forum_blog_pics_only\" INTEGER DEFAULT 0, \"discord_channel_id\" TEXT DEFAULT NULL, \"voice_bitrate\" INTEGER DEFAULT 0, \"afk_sub_code\" TEXT DEFAULT NULL, \"afk_timeout_minutes\" INTEGER DEFAULT 0, \"read_only\" INTEGER DEFAULT 0, \"former_names\" TEXT DEFAULT NULL, type_id INTEGER DEFAULT NULL)"
+  },
+  {
+    "name": "channel_members",
+    "sql": "CREATE TABLE channel_members (\n      channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,\n      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,\n      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP, \"auto_all_channels\" INTEGER NOT NULL DEFAULT 0, \"via_role_gate\" INTEGER NOT NULL DEFAULT 0,\n      PRIMARY KEY (channel_id, user_id)\n    )"
+  },
+  {
+    "name": "messages",
+    "sql": "CREATE TABLE messages (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,\n      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,\n      content TEXT NOT NULL,\n      reply_to INTEGER REFERENCES messages(id) ON DELETE SET NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    , \"edited_at\" DATETIME DEFAULT NULL, \"burn_seconds\" INTEGER DEFAULT 0, \"burning_started_at\" DATETIME DEFAULT NULL, \"break_chain\" INTEGER DEFAULT 0, \"type\" TEXT DEFAULT 'user', \"original_name\" TEXT DEFAULT NULL, \"is_webhook\" INTEGER DEFAULT 0, \"webhook_username\" TEXT DEFAULT NULL, \"webhook_id\" INTEGER DEFAULT NULL, persona_id INTEGER DEFAULT NULL REFERENCES user_personas(id) ON DELETE SET NULL, persona_username TEXT DEFAULT NULL, ferry_target TEXT DEFAULT NULL, persona_avatar TEXT DEFAULT NULL, \"blog_comment\" INTEGER DEFAULT 0, \"nsfw_by\" INTEGER DEFAULT NULL, \"imported_from\" TEXT DEFAULT NULL, \"webhook_avatar\" TEXT DEFAULT NULL, \"discord_message_id\" TEXT DEFAULT NULL, \"is_archived\" INTEGER DEFAULT 0, \"poll_data\" TEXT DEFAULT NULL, \"thread_id\" INTEGER DEFAULT NULL REFERENCES messages(id) ON DELETE CASCADE, title TEXT DEFAULT NULL, tags TEXT DEFAULT NULL, closed INTEGER DEFAULT 0, nsfw INTEGER DEFAULT 0, e2e_files TEXT DEFAULT NULL, destruct_at TEXT DEFAULT NULL, \"silent\" INTEGER NOT NULL DEFAULT 0)"
+  },
+  {
+    "name": "reactions",
+    "sql": "CREATE TABLE reactions (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      emoji TEXT NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(message_id, user_id, emoji)\n    )"
+  },
+  {
+    "name": "bans",
+    "sql": "CREATE TABLE bans (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      banned_by INTEGER NOT NULL REFERENCES users(id),\n      reason TEXT DEFAULT '',\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(user_id)\n    )"
+  },
+  {
+    "name": "ban_appeals",
+    "sql": "CREATE TABLE ban_appeals (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      appeal TEXT NOT NULL DEFAULT '',\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(user_id)\n    )"
+  },
+  {
+    "name": "mutes",
+    "sql": "CREATE TABLE mutes (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      muted_by INTEGER NOT NULL REFERENCES users(id),\n      reason TEXT DEFAULT '',\n      expires_at DATETIME NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "ip_bans",
+    "sql": "CREATE TABLE ip_bans (\n      ip          TEXT PRIMARY KEY,\n      banned_by   INTEGER REFERENCES users(id),\n      reason      TEXT DEFAULT '',\n      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "user_ips",
+    "sql": "CREATE TABLE user_ips (\n      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      ip         TEXT    NOT NULL,\n      last_seen  DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (user_id, ip)\n    )"
+  },
+  {
+    "name": "automod_domains",
+    "sql": "CREATE TABLE automod_domains (\n      domain             TEXT PRIMARY KEY,\n      mode               TEXT NOT NULL DEFAULT 'allow',\n      include_subdomains INTEGER NOT NULL DEFAULT 1,\n      note               TEXT DEFAULT '',\n      added_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,\n      created_at         DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "automod_infractions",
+    "sql": "CREATE TABLE automod_infractions (\n      id         INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,\n      rule       TEXT NOT NULL,\n      channel_id INTEGER,\n      host       TEXT,\n      excerpt    TEXT DEFAULT '',\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    , \"weight\" INTEGER NOT NULL DEFAULT 1)"
+  },
+  {
+    "name": "server_settings",
+    "sql": "CREATE TABLE server_settings (\n      key TEXT PRIMARY KEY,\n      value TEXT NOT NULL\n    )"
+  },
+  {
+    "name": "user_preferences",
+    "sql": "CREATE TABLE user_preferences (\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      key TEXT NOT NULL,\n      value TEXT NOT NULL,\n      PRIMARY KEY (user_id, key)\n    )"
+  },
+  {
+    "name": "eula_acceptances",
+    "sql": "CREATE TABLE eula_acceptances (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      version TEXT NOT NULL,\n      ip_address TEXT,\n      accepted_at DATETIME DEFAULT CURRENT_TIMESTAMP, \"age_verified\" INTEGER DEFAULT 0,\n      UNIQUE(user_id, version)\n    )"
+  },
+  {
+    "name": "invite_codes",
+    "sql": "CREATE TABLE invite_codes (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      code TEXT NOT NULL UNIQUE,\n      label TEXT DEFAULT '',\n      channels TEXT DEFAULT '',\n      enabled INTEGER DEFAULT 1,\n      max_uses INTEGER DEFAULT 0,\n      expires_at DATETIME DEFAULT NULL,\n      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    , \"spent\" INTEGER DEFAULT 0)"
+  },
+  {
+    "name": "invite_code_uses",
+    "sql": "CREATE TABLE invite_code_uses (\n      invite_code_id INTEGER NOT NULL REFERENCES invite_codes(id) ON DELETE CASCADE,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      used_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (invite_code_id, user_id)\n    )"
+  },
+  {
+    "name": "upload_ownership",
+    "sql": "CREATE TABLE upload_ownership (\n      rel_path TEXT PRIMARY KEY,\n      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,\n      bytes INTEGER NOT NULL DEFAULT 0,\n      scope TEXT NOT NULL DEFAULT 'channel',   -- 'channel' | 'dm' | 'profile'\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "media_objects",
+    "sql": "CREATE TABLE media_objects (\n      rel_path TEXT PRIMARY KEY,\n      bytes INTEGER NOT NULL,\n      content_type TEXT,\n      state TEXT NOT NULL DEFAULT 'live',   -- 'live' | 'deleted'\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      deleted_at DATETIME\n    )"
+  },
+  {
+    "name": "upload_tags",
+    "sql": "CREATE TABLE upload_tags (\n      id         INTEGER PRIMARY KEY AUTOINCREMENT,\n      name       TEXT NOT NULL,\n      name_norm  TEXT NOT NULL UNIQUE,\n      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    , \"role_id\" INTEGER DEFAULT NULL)"
+  },
+  {
+    "name": "attachment_tags",
+    "sql": "CREATE TABLE attachment_tags (\n      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      rel_path   TEXT NOT NULL,\n      tag_id     INTEGER NOT NULL REFERENCES upload_tags(id) ON DELETE CASCADE,\n      PRIMARY KEY (message_id, rel_path, tag_id)\n    )"
+  },
+  {
+    "name": "high_scores",
+    "sql": "CREATE TABLE high_scores (\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      game TEXT NOT NULL,\n      score INTEGER NOT NULL DEFAULT 0,\n      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (user_id, game)\n    )"
+  },
+  {
+    "name": "user_nicknames",
+    "sql": "CREATE TABLE user_nicknames (\n      owner_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      nickname  TEXT NOT NULL,\n      PRIMARY KEY (owner_id, target_id)\n    )"
+  },
+  {
+    "name": "whitelist",
+    "sql": "CREATE TABLE whitelist (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      username TEXT UNIQUE NOT NULL COLLATE NOCASE,\n      added_by INTEGER REFERENCES users(id),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "pinned_messages",
+    "sql": "CREATE TABLE pinned_messages (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      pinned_by INTEGER NOT NULL REFERENCES users(id),\n      pinned_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(message_id)\n    )"
+  },
+  {
+    "name": "custom_sounds",
+    "sql": "CREATE TABLE custom_sounds (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      name TEXT UNIQUE NOT NULL,\n      filename TEXT NOT NULL,\n      uploaded_by INTEGER REFERENCES users(id),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "sound_preferences",
+    "sql": "CREATE TABLE sound_preferences (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      sound_name TEXT NOT NULL,\n      hidden INTEGER DEFAULT 0,\n      custom_order INTEGER DEFAULT NULL,\n      UNIQUE(user_id, sound_name)\n    )"
+  },
+  {
+    "name": "disabled_builtin_sounds",
+    "sql": "CREATE TABLE disabled_builtin_sounds (\n      name TEXT PRIMARY KEY NOT NULL\n    )"
+  },
+  {
+    "name": "sound_volumes",
+    "sql": "CREATE TABLE sound_volumes (\n      sound_name TEXT PRIMARY KEY NOT NULL,\n      volume INTEGER NOT NULL DEFAULT 100\n    )"
+  },
+  {
+    "name": "custom_emojis",
+    "sql": "CREATE TABLE custom_emojis (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      name TEXT UNIQUE NOT NULL,\n      filename TEXT NOT NULL,\n      uploaded_by INTEGER REFERENCES users(id),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "stickers",
+    "sql": "CREATE TABLE stickers (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      name TEXT UNIQUE NOT NULL,\n      pack_name TEXT NOT NULL DEFAULT 'General',\n      filename TEXT NOT NULL,\n      uploaded_by INTEGER REFERENCES users(id),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "read_positions",
+    "sql": "CREATE TABLE read_positions (\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      last_read_message_id INTEGER NOT NULL DEFAULT 0,\n      PRIMARY KEY (user_id, channel_id)\n    )"
+  },
+  {
+    "name": "thread_reads",
+    "sql": "CREATE TABLE thread_reads (\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      thread_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      last_read_reply_id INTEGER NOT NULL DEFAULT 0,\n      PRIMARY KEY (user_id, thread_id)\n    )"
+  },
+  {
+    "name": "user_personas",
+    "sql": "CREATE TABLE user_personas (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      name TEXT NOT NULL,\n      avatar TEXT DEFAULT NULL,\n      bio TEXT DEFAULT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(user_id, name COLLATE NOCASE)\n    )"
+  },
+  {
+    "name": "roles",
+    "sql": "CREATE TABLE roles (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      name TEXT NOT NULL,\n      level INTEGER NOT NULL DEFAULT 0,\n      scope TEXT NOT NULL DEFAULT 'server',\n      color TEXT DEFAULT NULL,\n      auto_assign INTEGER NOT NULL DEFAULT 0,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    , \"link_channel_access\" INTEGER NOT NULL DEFAULT 0, \"icon\" TEXT DEFAULT NULL, \"max_upload_mb\" INTEGER DEFAULT NULL, \"transparent\" INTEGER NOT NULL DEFAULT 0, \"mentionable\" INTEGER NOT NULL DEFAULT 1, \"show_on_profile\" INTEGER NOT NULL DEFAULT 1, \"color2\" TEXT DEFAULT NULL, \"color_shimmer\" INTEGER NOT NULL DEFAULT 0)"
+  },
+  {
+    "name": "user_roles",
+    "sql": "CREATE TABLE user_roles (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,\n      channel_id INTEGER DEFAULT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      granted_by INTEGER REFERENCES users(id),\n      granted_at DATETIME DEFAULT CURRENT_TIMESTAMP, \"custom_level\" INTEGER DEFAULT NULL,\n      UNIQUE (user_id, role_id, channel_id)\n    )"
+  },
+  {
+    "name": "role_permissions",
+    "sql": "CREATE TABLE role_permissions (\n      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,\n      permission TEXT NOT NULL,\n      allowed INTEGER NOT NULL DEFAULT 1,\n      PRIMARY KEY (role_id, permission)\n    )"
+  },
+  {
+    "name": "user_role_perms",
+    "sql": "CREATE TABLE user_role_perms (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,\n      channel_id INTEGER DEFAULT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      permission TEXT NOT NULL,\n      allowed INTEGER NOT NULL DEFAULT 1\n    )"
+  },
+  {
+    "name": "push_subscriptions",
+    "sql": "CREATE TABLE push_subscriptions (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      endpoint TEXT NOT NULL,\n      p256dh TEXT NOT NULL,\n      auth TEXT NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \"scope\" TEXT NOT NULL DEFAULT 'all',\n      UNIQUE(user_id, endpoint)\n    )"
+  },
+  {
+    "name": "webhooks",
+    "sql": "CREATE TABLE webhooks (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      name TEXT NOT NULL DEFAULT 'Bot',\n      token TEXT UNIQUE NOT NULL,\n      avatar_url TEXT DEFAULT NULL,\n      created_by INTEGER REFERENCES users(id),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      is_active INTEGER DEFAULT 1\n    , callback_url TEXT DEFAULT NULL, callback_secret TEXT DEFAULT NULL, subscribed_events TEXT DEFAULT '*', last_delivery_status INTEGER DEFAULT NULL, last_delivery_at DATETIME DEFAULT NULL, last_delivery_error TEXT DEFAULT NULL, failure_count INTEGER DEFAULT 0, can_moderate INTEGER DEFAULT 0, can_use_voice INTEGER DEFAULT 0)"
+  },
+  {
+    "name": "ferry_links",
+    "sql": "CREATE TABLE ferry_links (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      guild_id TEXT NOT NULL,\n      guild_name TEXT,\n      discord_channel_id TEXT NOT NULL,\n      discord_channel_name TEXT,\n      direction TEXT NOT NULL DEFAULT 'both',\n      out_mode TEXT NOT NULL DEFAULT 'command',\n      webhook_id TEXT DEFAULT NULL,\n      webhook_token TEXT DEFAULT NULL,\n      is_active INTEGER NOT NULL DEFAULT 1,\n      last_activity_at DATETIME DEFAULT NULL,\n      last_error TEXT DEFAULT NULL,\n      created_by INTEGER REFERENCES users(id),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \"discord_channel_type\" INTEGER DEFAULT NULL,\n      UNIQUE(channel_id, discord_channel_id)\n    )"
+  },
+  {
+    "name": "ferry_message_map",
+    "sql": "CREATE TABLE ferry_message_map (\n      haven_message_id   INTEGER NOT NULL,\n      discord_message_id TEXT    NOT NULL,\n      discord_channel_id TEXT    NOT NULL,\n      discord_author_id  TEXT    DEFAULT NULL,\n      created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (haven_message_id, discord_message_id)\n    )"
+  },
+  {
+    "name": "ferry_reactions",
+    "sql": "CREATE TABLE ferry_reactions (\n      message_id      INTEGER NOT NULL,\n      emoji           TEXT    NOT NULL,\n      discord_user_id TEXT    NOT NULL,\n      name            TEXT    NOT NULL,\n      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (message_id, emoji, discord_user_id)\n    )"
+  },
+  {
+    "name": "ferry_forum_threads",
+    "sql": "CREATE TABLE ferry_forum_threads (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      topic_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      guild_id TEXT NOT NULL,\n      discord_forum_id TEXT NOT NULL,\n      discord_thread_id TEXT NOT NULL,\n      origin TEXT NOT NULL DEFAULT 'discord',\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(topic_message_id, discord_forum_id),\n      UNIQUE(discord_thread_id, channel_id)\n    )"
+  },
+  {
+    "name": "fcm_tokens",
+    "sql": "CREATE TABLE fcm_tokens (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      token TEXT NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP, \"scope\" TEXT NOT NULL DEFAULT 'all',\n      UNIQUE(user_id, token)\n    )"
+  },
+  {
+    "name": "user_channel_prefs",
+    "sql": "CREATE TABLE user_channel_prefs (\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      channel_code TEXT NOT NULL,\n      muted INTEGER NOT NULL DEFAULT 0,\n      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (user_id, channel_code)\n    )"
+  },
+  {
+    "name": "dm_group_keys",
+    "sql": "CREATE TABLE dm_group_keys (\n      channel_id   INTEGER NOT NULL,\n      epoch        INTEGER NOT NULL,\n      recipient_id INTEGER NOT NULL,\n      wrapped_key  TEXT    NOT NULL,\n      wrapped_by   INTEGER NOT NULL,\n      created_at   TEXT DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (channel_id, epoch, recipient_id)\n    )"
+  },
+  {
+    "name": "forum_votes",
+    "sql": "CREATE TABLE forum_votes (\n      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      value      INTEGER NOT NULL CHECK (value IN (1, -1)),\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (message_id, user_id)\n    )"
+  },
+  {
+    "name": "dm_group_invites",
+    "sql": "CREATE TABLE dm_group_invites (\n      channel_id INTEGER NOT NULL,\n      user_id    INTEGER NOT NULL,\n      invited_by INTEGER NOT NULL,\n      created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (channel_id, user_id)\n    )"
+  },
+  {
+    "name": "dm_group_rewrap_requests",
+    "sql": "CREATE TABLE dm_group_rewrap_requests (\n      channel_id    INTEGER NOT NULL,\n      epoch         INTEGER NOT NULL,\n      requester_id  INTEGER NOT NULL,\n      created_at    TEXT DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (channel_id, epoch, requester_id)\n    )"
+  },
+  {
+    "name": "user_signing_keys",
+    "sql": "CREATE TABLE user_signing_keys (\n      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      fp         TEXT    NOT NULL,\n      jwk        TEXT    NOT NULL,\n      created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (user_id, fp)\n    )"
+  },
+  {
+    "name": "dm_group_epochs",
+    "sql": "CREATE TABLE dm_group_epochs (\n      channel_id   INTEGER NOT NULL,\n      epoch        INTEGER NOT NULL,\n      published_by INTEGER NOT NULL,\n      sig          TEXT    NOT NULL,\n      roster       TEXT    NOT NULL,\n      PRIMARY KEY (channel_id, epoch)\n    )"
+  },
+  {
+    "name": "role_channel_access",
+    "sql": "CREATE TABLE role_channel_access (\n      role_id    INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,\n      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      grant_on_promote  INTEGER NOT NULL DEFAULT 0,\n      revoke_on_demote  INTEGER NOT NULL DEFAULT 0,\n      PRIMARY KEY (role_id, channel_id)\n    )"
+  },
+  {
+    "name": "totp_backup_codes",
+    "sql": "CREATE TABLE totp_backup_codes (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      code_hash TEXT NOT NULL,\n      used INTEGER DEFAULT 0,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "account_recovery_codes",
+    "sql": "CREATE TABLE account_recovery_codes (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      code_hash TEXT NOT NULL,\n      used INTEGER DEFAULT 0,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "poll_votes",
+    "sql": "CREATE TABLE poll_votes (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      option_index INTEGER NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(message_id, user_id, option_index)\n    )"
+  },
+  {
+    "name": "scheduled_messages",
+    "sql": "CREATE TABLE scheduled_messages (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,\n      content TEXT NOT NULL,\n      send_at TEXT NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "deleted_users",
+    "sql": "CREATE TABLE deleted_users (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      username TEXT NOT NULL,\n      display_name TEXT DEFAULT NULL,\n      reason TEXT DEFAULT '',\n      deleted_by INTEGER REFERENCES users(id),\n      deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "bot_commands",
+    "sql": "CREATE TABLE bot_commands (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      webhook_id INTEGER NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,\n      command TEXT NOT NULL,\n      description TEXT DEFAULT '',\n      subcommands_json TEXT DEFAULT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      UNIQUE(webhook_id, command)\n    )"
+  },
+  {
+    "name": "role_menus",
+    "sql": "CREATE TABLE role_menus (\n      message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,\n      channel_id INTEGER NOT NULL,\n      created_by INTEGER,\n      title TEXT DEFAULT '',\n      data TEXT NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "released_uploads",
+    "sql": "CREATE TABLE released_uploads (\n      rel_path    TEXT PRIMARY KEY,\n      released_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "audit_log",
+    "sql": "CREATE TABLE audit_log (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,\n      actor_username TEXT,\n      action TEXT NOT NULL,\n      target_type TEXT,\n      target_id INTEGER,\n      target_name TEXT,\n      details TEXT DEFAULT NULL\n    )"
+  },
+  {
+    "name": "message_highlights",
+    "sql": "CREATE TABLE message_highlights (\n      message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,\n      role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "message_quotes",
+    "sql": "CREATE TABLE message_quotes (\n      message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,\n      quote_of INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE\n    )"
+  },
+  {
+    "name": "mod_cases",
+    "sql": "CREATE TABLE mod_cases (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,\n      actor_name TEXT,\n      type TEXT NOT NULL,\n      reason TEXT,\n      severity INTEGER NOT NULL DEFAULT 0,\n      duration_minutes INTEGER,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      seen_at DATETIME,\n      revoked_at DATETIME,\n      revoked_by TEXT\n    )"
+  },
+  {
+    "name": "forum_topic_mutes",
+    "sql": "CREATE TABLE forum_topic_mutes (\n      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      topic_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,\n      PRIMARY KEY (user_id, topic_id)\n    )"
+  },
+  {
+    "name": "badges",
+    "sql": "CREATE TABLE badges (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      name        TEXT    NOT NULL,\n      description TEXT    NOT NULL DEFAULT '',\n      icon_type   TEXT    NOT NULL CHECK (icon_type IN ('emoji', 'image', 'builtin')),\n      icon        TEXT    NOT NULL,\n      icon_key    TEXT    DEFAULT NULL,\n      kind        TEXT    NOT NULL CHECK (kind IN ('account_age', 'messages', 'forum_likes', 'role', 'manual')),\n      threshold   INTEGER DEFAULT NULL,\n      role_id     INTEGER DEFAULT NULL REFERENCES roles(id) ON DELETE SET NULL,\n      enabled     INTEGER NOT NULL DEFAULT 1,\n      position    INTEGER NOT NULL DEFAULT 0,\n      created_by  INTEGER DEFAULT NULL REFERENCES users(id) ON DELETE SET NULL,\n      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "user_badges",
+    "sql": "CREATE TABLE user_badges (\n      badge_id   INTEGER NOT NULL REFERENCES badges(id) ON DELETE CASCADE,\n      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      granted_by INTEGER DEFAULT NULL REFERENCES users(id) ON DELETE SET NULL,\n      granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (badge_id, user_id)\n    )"
+  },
+  {
+    "name": "badge_hidden",
+    "sql": "CREATE TABLE badge_hidden (\n      user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      badge_id INTEGER NOT NULL REFERENCES badges(id) ON DELETE CASCADE,\n      PRIMARY KEY (user_id, badge_id)\n    )"
+  },
+  {
+    "name": "badge_stats",
+    "sql": "CREATE TABLE badge_stats (\n      user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,\n      messages    INTEGER NOT NULL DEFAULT 0,\n      forum_likes INTEGER NOT NULL DEFAULT 0\n    )"
+  },
+  {
+    "name": "user_connections",
+    "sql": "CREATE TABLE user_connections (\n      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n      provider      TEXT    NOT NULL,\n      external_id   TEXT,\n      display_name  TEXT,\n      access_token  TEXT,\n      refresh_token TEXT,\n      expires_at    INTEGER DEFAULT 0,\n      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,\n      PRIMARY KEY (user_id, provider)\n    )"
+  },
+  {
+    "name": "listening_tokens",
+    "sql": "CREATE TABLE listening_tokens (\n      user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,\n      token      TEXT UNIQUE NOT NULL,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "channel_types",
+    "sql": "CREATE TABLE channel_types (\n      id         INTEGER PRIMARY KEY AUTOINCREMENT,\n      name       TEXT NOT NULL,\n      icon       TEXT NOT NULL,\n      functions  TEXT NOT NULL,\n      position   INTEGER DEFAULT 0,\n      created_at DATETIME DEFAULT CURRENT_TIMESTAMP\n    )"
+  },
+  {
+    "name": "messages_fts",
+    "sql": "CREATE VIRTUAL TABLE messages_fts USING fts5(\n      content,\n      content='messages',\n      content_rowid='id',\n      tokenize='unicode61'\n    )"
+  },
+  {
+    "name": "messages_fts_data",
+    "sql": "CREATE TABLE 'messages_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+  },
+  {
+    "name": "messages_fts_idx",
+    "sql": "CREATE TABLE 'messages_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+  },
+  {
+    "name": "messages_fts_docsize",
+    "sql": "CREATE TABLE 'messages_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+  },
+  {
+    "name": "messages_fts_config",
+    "sql": "CREATE TABLE 'messages_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+  },
+  {
+    "name": "privacy_held",
+    "sql": "CREATE TABLE privacy_held (\n    rel_path TEXT PRIMARY KEY,\n    attempts INTEGER NOT NULL DEFAULT 1,\n    last_error TEXT,\n    failed INTEGER NOT NULL DEFAULT 0,\n    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\n  )"
+  }
+]
