@@ -15,7 +15,7 @@ fn test_slash_parse_parity() {
             if s["expected"].is_null() {
                 assert!(parsed.is_none(), "Expected null for input: {}", input);
             } else {
-                let p = parsed.expect(&format!("Expected command for input: {}", input));
+                let p = parsed.unwrap_or_else(|| panic!("Expected command for input: {}", input));
                 assert_eq!(p.cmd, s["expected"]["command"].as_str().unwrap());
                 assert_eq!(p.arg, s["expected"]["args"].as_str().unwrap());
             }

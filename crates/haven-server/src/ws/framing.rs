@@ -38,8 +38,7 @@ pub fn parse_packet(raw: &str) -> Option<SocketIoPacket> {
         });
     }
 
-    if raw.starts_with("42") {
-        let json_part = &raw[2..];
+    if let Some(json_part) = raw.strip_prefix("42") {
         if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(json_part) {
             if let Some(first) = arr.first() {
                 if let Some(event_name) = first.as_str() {

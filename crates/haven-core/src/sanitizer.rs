@@ -72,7 +72,7 @@ pub fn parse_blocked_names(raw: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
 
-    for part in raw.split(|c| c == '\n' || c == ',') {
+    for part in raw.split(['\n', ',']) {
         let trimmed: String = part.split_whitespace().collect::<Vec<_>>().join(" ");
         let word: String = trimmed.chars().take(MAX_WORD_LEN).collect();
         let key = reduce_name(&word, 'i');

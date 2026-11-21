@@ -44,11 +44,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             get(crate::routes::channels::list_channels).post(crate::routes::channels::create_channel),
         )
         .route(
-            "/api/channels/:code",
+            "/api/channels/{code}",
             get(crate::routes::channels::get_channel),
         )
         .route(
-            "/api/channels/:code/messages",
+            "/api/channels/{code}/messages",
             get(crate::routes::messages::list_channel_messages),
         )
         // === Bot API ===

@@ -25,7 +25,6 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 jsonwebtoken = "9.3"
 bcrypt = "0.17"
-tokio-tungstenite = "0.26"
 futures-util = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

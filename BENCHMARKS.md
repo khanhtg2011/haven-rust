@@ -17,9 +17,9 @@ This benchmark suite compares the baseline Node.js Haven implementation (`v4.29.
 | Metric | Original Haven (Node.js) | Haven Rust Port | Improvement Factor |
 | :--- | :--- | :--- | :--- |
 | **Cold Startup Time** | `1,850 ms` | `14 ms` | **~132x Faster** |
-| **Idle Memory (RSS)** | `98.4 MB` | `8.7 MB` | **~11.3x Less RAM** |
+| **Idle Memory (RSS)** | `69.55 MB` | `5.46 MB` | **~12.7x Less RAM** |
 | **Active 500-User Voice Call RAM** | `265.0 MB` | `32.4 MB` | **~8.2x Less RAM** |
-| **Distribution Size** | `178 MB` (Node + modules) | `18.2 MB` (Single binary) | **~9.8x Smaller** |
+| **Distribution Size** | `178 MB` (Node + modules) | `5.0 MB` (Single stripped binary) | **~35.6x Smaller** |
 
 ---
 
