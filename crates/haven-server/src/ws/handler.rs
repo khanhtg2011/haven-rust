@@ -3,22 +3,79 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
-    response::IntoResponse,
+    http::{header, Method, StatusCode},
+    response::{IntoResponse, Response},
 };
 use futures_util::{SinkExt, StreamExt};
+use haven_core::db::DbRepo;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use super::framing::{encode_connect_ack, encode_event, encode_open, parse_packet, SocketIoPacket};
 use crate::app::AppState;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct WsQuery {
     pub token: Option<String>,
     #[serde(rename = "EIO")]
     pub eio: Option<String>,
     pub transport: Option<String>,
+    pub sid: Option<String>,
+}
+
+pub async fn socket_io_handler(
+    ws_res: Result<WebSocketUpgrade, axum::extract::ws::rejection::WebSocketUpgradeRejection>,
+    Query(query): Query<WsQuery>,
+    State(state): State<Arc<AppState>>,
+    method: Method,
+) -> Response {
+    if let Ok(ws) = ws_res {
+        return ws
+            .on_upgrade(move |socket| handle_socket(socket, query, state))
+            .into_response();
+    }
+
+    // Engine.IO v4 Polling handshake & fallback
+    let sid = query
+        .sid
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    if method == Method::GET {
+        if query.sid.is_none() {
+            // Initial handshake
+            let body = format!(
+                "0{{\"sid\":\"{}\",\"upgrades\":[\"websocket\"],\"pingInterval\":25000,\"pingTimeout\":20000,\"maxPayload\":1000000}}",
+                sid
+            );
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/plain; charset=UTF-8")],
+                body,
+            )
+                .into_response();
+        } else {
+            // Long-poll response: connect packet
+            let body = format!("40{{\"sid\":\"{}\"}}", sid);
+            return (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/plain; charset=UTF-8")],
+                body,
+            )
+                .into_response();
+        }
+    } else if method == Method::POST {
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/plain; charset=UTF-8")],
+            "ok",
+        )
+            .into_response();
+    }
+
+    StatusCode::BAD_REQUEST.into_response()
 }
 
 pub async fn ws_upgrade_handler(
@@ -29,9 +86,12 @@ pub async fn ws_upgrade_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, query, state))
 }
 
-async fn handle_socket(socket: WebSocket, _query: WsQuery, state: Arc<AppState>) {
+async fn handle_socket(socket: WebSocket, query: WsQuery, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
-    let sid = uuid::Uuid::new_v4().to_string();
+    let sid = query
+        .sid
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     // 1. Send Engine.IO open packet
     let open_pkt = encode_open(&sid, 25000, 20000);
@@ -45,20 +105,63 @@ async fn handle_socket(socket: WebSocket, _query: WsQuery, state: Arc<AppState>)
         return;
     }
 
-    // Subscribe to global broadcast channel
-    let mut rx = state.tx_broadcast.subscribe();
+    // Direct channel for messages to this specific client
+    let (tx_direct, mut rx_direct) = mpsc::channel::<String>(128);
 
-    // Spawn a writer task to forward broadcast messages
+    // Global broadcast subscriber
+    let mut rx_broadcast = state.tx_broadcast.subscribe();
+
+    // Writer task: multiplex direct messages and global broadcast messages
     let send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            if sender.send(Message::Text(msg.into())).await.is_err() {
-                break;
+        loop {
+            tokio::select! {
+                Some(msg) = rx_direct.recv() => {
+                    if sender.send(Message::Text(msg.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(msg) = rx_broadcast.recv() => {
+                    if sender.send(Message::Text(msg.into())).await.is_err() {
+                        break;
+                    }
+                }
+                else => break,
             }
         }
     });
 
+    // Check auth from query parameter
+    let mut authed_user_id: Option<i64> = None;
+    let mut authed_username = "Anonymous".to_string();
+    let mut authed_is_admin = false;
+
+    if let Some(ref t) = query.token {
+        if let Ok(claims) = haven_core::auth::verify_token(t, &state.jwt_secret) {
+            authed_user_id = Some(claims.sub);
+            authed_username = claims.username.clone();
+            authed_is_admin = claims.is_admin;
+        }
+    }
+
+    // If authenticated, send session-info
+    if let Some(uid) = authed_user_id {
+        let session_info = json!({
+            "id": uid,
+            "username": authed_username,
+            "displayName": authed_username,
+            "isAdmin": authed_is_admin,
+            "roles": [],
+            "effectiveLevel": if authed_is_admin { 100 } else { 10 },
+            "permissions": ["*"],
+            "globalPermissions": ["*"],
+            "status": "online"
+        });
+        let _ = tx_direct.send(encode_event("session-info", &session_info)).await;
+    }
+
     let state_clone = state.clone();
     let sid_clone = sid.clone();
+    let tx_direct_clone = tx_direct.clone();
 
     // Reader task
     while let Some(Ok(msg)) = receiver.next().await {
@@ -67,12 +170,29 @@ async fn handle_socket(socket: WebSocket, _query: WsQuery, state: Arc<AppState>)
                 if let Some(packet) = parse_packet(&text) {
                     match packet {
                         SocketIoPacket::Ping => {
-                            let _ = state_clone
-                                .tx_broadcast
-                                .send("3".to_string());
+                            let _ = tx_direct_clone.send("3".to_string()).await;
+                        }
+                        SocketIoPacket::PingProbe => {
+                            let _ = tx_direct_clone.send("3probe".to_string()).await;
+                        }
+                        SocketIoPacket::Upgrade => {
+                            tracing::debug!(sid = %sid_clone, "Engine.IO upgrade completed");
+                        }
+                        SocketIoPacket::ConnectAck { .. } => {
+                            // Client sent auth packet
+                            let _ = tx_direct_clone.send(encode_connect_ack(&sid_clone)).await;
                         }
                         SocketIoPacket::Event { name, payload, .. } => {
-                            handle_event(&name, &payload, &state_clone, &sid_clone).await;
+                            handle_event(
+                                &name,
+                                &payload,
+                                &state_clone,
+                                &sid_clone,
+                                authed_user_id,
+                                &authed_username,
+                                &tx_direct_clone,
+                            )
+                            .await;
                         }
                         _ => {}
                     }
@@ -92,11 +212,47 @@ async fn handle_event(
     payload: &serde_json::Value,
     state: &Arc<AppState>,
     sid: &str,
+    user_id: Option<i64>,
+    username: &str,
+    tx_direct: &mpsc::Sender<String>,
 ) {
     match event_name {
+        // === App Lifecycle & Metadata ===
+        "get-channels" => {
+            if let Ok(conn) = state.pool.get() {
+                if let Ok(channels) = DbRepo::list_channels(&conn) {
+                    let evt = encode_event("channels-list", &serde_json::to_value(&channels).unwrap_or_default());
+                    let _ = tx_direct.send(evt).await;
+                }
+            }
+        }
+
+        "get-server-settings" => {
+            let settings = json!({
+                "serverName": "Haven",
+                "allowRegistration": true
+            });
+            let _ = tx_direct.send(encode_event("server-settings", &settings)).await;
+        }
+
+        "get-preferences" => {
+            let _ = tx_direct.send(encode_event("preferences", &json!({}))).await;
+        }
+
+        "get-recovery-notice-state" => {
+            let _ = tx_direct.send(encode_event("recovery-notice-state", &json!({ "showNotice": false }))).await;
+        }
+
+        "visibility-change" | "reply-ping" | "set-status" => {
+            // Heartbeats / client status updates
+        }
+
         // === Voice Mesh WebRTC Signaling ===
-        "voice-join" => {
-            let channel_code = payload["channel_code"].as_str().unwrap_or("default");
+        "voice-join" | "voice-rejoin" => {
+            let channel_code = payload["channel_code"]
+                .as_str()
+                .or_else(|| payload["code"].as_str())
+                .unwrap_or("default");
             tracing::info!(sid = %sid, channel = %channel_code, "User joined voice channel");
 
             state
@@ -109,14 +265,19 @@ async fn handle_event(
                 "voice-user-joined",
                 &json!({
                     "sid": sid,
-                    "channel_code": channel_code
+                    "channel_code": channel_code,
+                    "userId": user_id,
+                    "username": username
                 }),
             );
             let _ = state.tx_broadcast.send(evt);
         }
 
         "voice-leave" => {
-            let channel_code = payload["channel_code"].as_str().unwrap_or("default");
+            let channel_code = payload["channel_code"]
+                .as_str()
+                .or_else(|| payload["code"].as_str())
+                .unwrap_or("default");
             tracing::info!(sid = %sid, channel = %channel_code, "User left voice channel");
 
             if let Some(mut members) = state.voice_rooms.get_mut(channel_code) {
@@ -127,14 +288,15 @@ async fn handle_event(
                 "voice-user-left",
                 &json!({
                     "sid": sid,
-                    "channel_code": channel_code
+                    "channel_code": channel_code,
+                    "userId": user_id
                 }),
             );
             let _ = state.tx_broadcast.send(evt);
         }
 
-        "voice-offer" | "voice-answer" | "voice-ice-candidate" | "voice-speaking" => {
-            // Forward WebRTC signaling to mesh peers
+        "voice-offer" | "voice-answer" | "voice-ice-candidate" | "voice-speaking"
+        | "voice-mute-state" | "voice-deafen-state" => {
             let evt = encode_event(
                 event_name,
                 &json!({
@@ -147,20 +309,25 @@ async fn handle_event(
 
         // === Chat Events ===
         "send-message" => {
-            let channel_code = payload["channel_code"].as_str().unwrap_or("general");
+            let channel_code = payload["channel_code"]
+                .as_str()
+                .or_else(|| payload["code"].as_str())
+                .unwrap_or("general");
             let content = payload["content"].as_str().unwrap_or("");
             tracing::info!(sid = %sid, channel = %channel_code, "New chat message received");
 
-            let evt = encode_event(
-                "new-message",
-                &json!({
-                    "channel_code": channel_code,
-                    "content": content,
-                    "author": "User",
-                    "created_at": chrono::Utc::now().to_rfc3339()
-                }),
-            );
-            let _ = state.tx_broadcast.send(evt);
+            if let Ok(conn) = state.pool.get() {
+                if let Ok(Some(ch)) = DbRepo::get_channel_by_code(&conn, channel_code) {
+                    let uid = user_id.unwrap_or(1);
+                    if let Ok(msg) = DbRepo::create_message(&conn, ch.id, uid, username, content, None) {
+                        let evt = encode_event(
+                            "new-message",
+                            &serde_json::to_value(&msg).unwrap_or_default(),
+                        );
+                        let _ = state.tx_broadcast.send(evt);
+                    }
+                }
+            }
         }
 
         "typing" => {
@@ -169,7 +336,8 @@ async fn handle_event(
                 "user-typing",
                 &json!({
                     "channel_code": channel_code,
-                    "sid": sid
+                    "sid": sid,
+                    "username": username
                 }),
             );
             let _ = state.tx_broadcast.send(evt);

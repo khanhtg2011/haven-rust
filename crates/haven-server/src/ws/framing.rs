@@ -8,7 +8,10 @@ pub enum SocketIoPacket {
         ping_timeout: u64,
     },
     Ping,
+    PingProbe,
     Pong,
+    PongProbe,
+    Upgrade,
     ConnectAck {
         sid: String,
     },
@@ -28,8 +31,17 @@ pub fn parse_packet(raw: &str) -> Option<SocketIoPacket> {
     if raw == "2" {
         return Some(SocketIoPacket::Ping);
     }
+    if raw == "2probe" {
+        return Some(SocketIoPacket::PingProbe);
+    }
     if raw == "3" {
         return Some(SocketIoPacket::Pong);
+    }
+    if raw == "3probe" {
+        return Some(SocketIoPacket::PongProbe);
+    }
+    if raw == "5" {
+        return Some(SocketIoPacket::Upgrade);
     }
 
     if raw.starts_with("40") {
@@ -64,7 +76,7 @@ pub fn encode_event(event_name: &str, payload: &Value) -> String {
 pub fn encode_open(sid: &str, ping_interval: u64, ping_timeout: u64) -> String {
     let obj = serde_json::json!({
         "sid": sid,
-        "upgrades": [],
+        "upgrades": ["websocket"],
         "pingInterval": ping_interval,
         "pingTimeout": ping_timeout,
         "maxPayload": 1000000
@@ -85,6 +97,7 @@ mod tests {
     #[test]
     fn test_framing_roundtrip() {
         assert_eq!(parse_packet("2"), Some(SocketIoPacket::Ping));
+        assert_eq!(parse_packet("2probe"), Some(SocketIoPacket::PingProbe));
         assert_eq!(parse_packet("3"), Some(SocketIoPacket::Pong));
 
         let payload = json!({"channel_code": "general", "content": "hi"});

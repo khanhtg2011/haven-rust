@@ -91,7 +91,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             post(crate::routes::bot::post_bot_voice_play),
         )
         // === WebSocket / Socket.IO ===
-        .route("/socket.io/", get(crate::ws::handler::ws_upgrade_handler))
+        .route(
+            "/socket.io/",
+            get(crate::ws::handler::socket_io_handler).post(crate::ws::handler::socket_io_handler),
+        )
         .route("/ws", get(crate::ws::handler::ws_upgrade_handler))
         // === Static Assets (CSS, JS, Fonts, Emoji, Uploads...) ===
         .fallback_service(serve_dir)
