@@ -1,0 +1,121 @@
+name: Release Haven Multi-Platform
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x86_64
+            bin: haven.exe
+            archive: haven-v4.29.0-windows-x86_64.zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-x86_64
+            bin: haven
+            archive: haven-v4.29.0-linux-x86_64.tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macos-arm64
+            bin: haven
+            archive: haven-v4.29.0-macos-arm64.tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            name: macos-x86_64
+            bin: haven
+            archive: haven-v4.29.0-macos-x86_64.tar.gz
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config libssl-dev
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\haven
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" -Destination dist\haven\
+          Copy-Item -Recurse public dist\haven\
+          Copy-Item README.md, MIGRATION_NOTES.md, BENCHMARKS.md dist\haven\
+          Compress-Archive -Path dist\haven\* -DestinationPath ${{ matrix.archive }}
+
+      - name: Package artifacts (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist/haven
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} dist/haven/
+          cp -r public dist/haven/
+          cp README.md MIGRATION_NOTES.md BENCHMARKS.md dist/haven/
+          tar -czf ${{ matrix.archive }} -C dist/haven .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.archive }}
+
+  create-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || 'v4.29.0' }}
+          name: Haven v4.29.0 (High-Performance Rust Edition)
+          body: |
+            ## ⬡ Haven v4.29.0 (Rust Edition)
+            
+            Multi-platform desktop and server release for Windows, Linux, and macOS.
+            
+            ### Highlights
+            - **RAM Footprint**: ~5.4MB idle memory (12.7x reduction compared to Node.js)
+            - **Binary Size**: Self-contained ~5MB native executable
+            - **Native Engine**: Powered by Axum 0.8, Tokio, Engine.IO v4, and CPAL audio loopback.
+            - **Giao diện Web & Desktop**: Tích hợp sẵn toàn bộ static assets (`public/`).
+            
+            ### Included Packages:
+            - **Windows**: `haven-v4.29.0-windows-x86_64.zip`
+            - **Linux**: `haven-v4.29.0-linux-x86_64.tar.gz`
+            - **macOS Apple Silicon (M1/M2/M3/M4)**: `haven-v4.29.0-macos-arm64.tar.gz`
+            - **macOS Intel**: `haven-v4.29.0-macos-x86_64.tar.gz`
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
